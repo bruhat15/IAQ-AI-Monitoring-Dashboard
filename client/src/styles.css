@@ -1,0 +1,30 @@
+/* Basic global styles for a clean, modern look */
+:root {
+  --bg: #f7f7fb;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --muted-text: #55627a;
+  --border: #e5e7eb;
+}
+
+[data-theme="dark"] {
+  --bg: #0b1220;
+  --surface: #0f172a;
+  --text: #e5e7eb;
+  --muted-text: #94a3b8;
+  --border: #1f2937;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  margin: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
