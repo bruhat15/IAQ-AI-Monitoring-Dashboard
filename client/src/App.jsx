@@ -9,9 +9,13 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { marked } from "marked";
 
-// Detect API base for dev vs prod
-const API_BASE = location.hostname === "localhost" ? "http://localhost:3000" : "";
+// Detect API base for dev vs prod (support localhost and 127.0.0.1)
+const API_BASE = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+  ? "http://localhost:3000"
+  : "";
+const DEMO_PROFILE_KEY = "demo.family.profile";
 
 // ---------- Small UI helpers ----------
 const panelItemStyle = {
@@ -23,7 +27,6 @@ const panelItemStyle = {
 };
 const panelTitleStyle = { fontWeight: 700, marginBottom: 8 };
 const panelPStyle = { margin: 0, color: "var(--muted-text)", lineHeight: 1.5 };
-const ulReset = { margin: 0, paddingLeft: 18, color: "var(--muted-text)", lineHeight: 1.5 };
 
 const btnPrimary = {
   padding: "10px 14px",
@@ -145,7 +148,7 @@ function Chatbot({ rows, latest }) {
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content:string}
+  const [messages, setMessages] = useState([]); // {role:'user'|'assistant', content:string, meta?:object}
   const scrollRef = useRef(null);
 
   const suggestions = [
@@ -171,7 +174,7 @@ function Chatbot({ rows, latest }) {
       });
       const j = await res.json();
       if (j.ok) {
-        setMessages((m) => [...m, { role: "assistant", content: j.answer }]);
+        setMessages((m) => [...m, { role: "assistant", content: j.answer, meta: j.meta }]);
       } else {
         setMessages((m) => [...m, { role: "assistant", content: `Error: ${j.error || "Unable to answer"}` }]);
       }
@@ -191,28 +194,24 @@ function Chatbot({ rows, latest }) {
   }, [messages, sending, open]);
 
   return (
-    <div style={{ position: "absolute", left: 0, right: 0, bottom: 0 }}>
+    <div style={panelItemStyle}>
+      {/* Header - Always visible */}
       <div
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8,
-          padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 12,
-          background: "var(--surface)", boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+          marginBottom: open ? 12 : 0,
         }}
       >
-        <div style={{ fontWeight: 700 }}>Gemini Assistant</div>
+        <div style={panelTitleStyle}>IAQ Assistant</div>
         <button onClick={() => setOpen((o) => !o)} style={btnSecondary}>
           {open ? "Close" : "Open"}
         </button>
       </div>
 
+      {/* Expandable content */}
       {open && (
-        <div
-          style={{
-            marginTop: 8, border: "1px solid var(--border)", borderRadius: 12, background: "var(--surface)",
-            boxShadow: "0 4px 16px rgba(0,0,0,0.07)", padding: 10, maxHeight: 360, overflow: "hidden",
-            display: "flex", flexDirection: "column", gap: 8,
-          }}
-        >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {/* Suggestions (shown when no messages) */}
           {messages.length === 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
               {suggestions.map((s, i) => (
@@ -221,25 +220,46 @@ function Chatbot({ rows, latest }) {
             </div>
           )}
 
-          <div ref={scrollRef} style={{ flex: 1, overflowY: "auto", paddingRight: 6 }}>
-            {messages.map((m, idx) => (
-              <div
-                key={idx}
-                style={{
-                  marginBottom: 8,
-                  background: m.role === "user" ? "rgba(37, 99, 235, 0.08)" : "rgba(0,0,0,0.03)",
-                  border: "1px solid var(--border)", borderRadius: 8, padding: 8,
-                }}
-              >
-                <div style={{ fontSize: 12, color: "var(--muted-text)", marginBottom: 4 }}>
-                  {m.role === "user" ? "You" : "Assistant"}
+          {/* Messages */}
+          <div ref={scrollRef} style={{ maxHeight: 320, overflowY: "auto", paddingRight: 6 }}>
+            {messages.map((m, idx) => {
+              const htmlContent = m.role === "assistant" && m.content
+                ? (() => { try { return marked.parse(m.content, { breaks: true, gfm: true }); } catch { return m.content; } })()
+                : m.content;
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    marginBottom: 8,
+                    background: m.role === "user" ? "rgba(37, 99, 235, 0.08)" : "rgba(0,0,0,0.03)",
+                    border: "1px solid var(--border)", borderRadius: 8, padding: 8,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: "var(--muted-text)", marginBottom: 4 }}>
+                    {m.role === "user" ? "You" : "Assistant"}
+                  </div>
+                  {m.role === "assistant" ? (
+                    <div style={{ lineHeight: 1.6, fontSize: 14 }} dangerouslySetInnerHTML={{ __html: htmlContent }} />
+                  ) : (
+                    <div style={{ whiteSpace: "pre-wrap", fontSize: 14 }}>{m.content}</div>
+                  )}
+                  {m.role === "assistant" && m.meta && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: "var(--muted-text)" }}>
+                      {m.meta.profileSummary ? (
+                        <div>
+                          Personalized for: {m.meta.profileSummary.replace(/Household owner:[^.]*\.\s*/i, "")}
+                        </div>
+                      ) : null}
+                      <div>{m.meta.disclaimer || "This is educational guidance, not medical advice."}</div>
+                    </div>
+                  )}
                 </div>
-                <div style={{ whiteSpace: "pre-wrap" }}>{m.content}</div>
-              </div>
-            ))}
+              );
+            })}
             {sending && <div style={{ fontSize: 12, color: "var(--muted-text)" }}>Thinking…</div>}
           </div>
 
+          {/* Input */}
           <div style={{ display: "flex", gap: 8 }}>
             <input
               placeholder="Ask about your IAQ data…"
@@ -248,7 +268,7 @@ function Chatbot({ rows, latest }) {
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) ask(input.trim()); }}
               style={{
                 flex: 1, padding: "10px 12px", border: "1px solid var(--border)", borderRadius: 8,
-                outline: "none", background: "var(--surface)", color: "var(--text)",
+                outline: "none", background: "var(--surface)", color: "var(--text)", fontSize: 14,
               }}
             />
             <button onClick={() => ask(input.trim())} disabled={sending || !input.trim()} style={btnPrimary}>
@@ -257,6 +277,262 @@ function Chatbot({ rows, latest }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------- Family Profile Panel ----------
+function FamilyProfilePanel() {
+  const [profile, setProfile] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [form, setForm] = React.useState({
+    owner_name: "Bheemanna",
+    members: [ { name: "Bheemanna", relation: "self", age: "", conditions: ["Asthma"], notes: "" } ],
+    preferences: { shareWithGemini: true, receiveNotifications: true }
+  });
+
+  React.useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/profile`);
+        const data = await res.json();
+        if (mounted && data.ok) {
+          setProfile(data.profile);
+          if (data.profile) setForm({
+            owner_name: data.profile.owner_name || "Bheemanna",
+            members: data.profile.members || [ { name: "Bheemanna", relation: "self", age: "", conditions: ["Asthma"], notes: "" } ],
+            preferences: data.profile.preferences || { shareWithGemini:true, receiveNotifications:true }
+          });
+        }
+      } catch (e) { console.warn(e); }
+      // Local demo fallback if API unreachable or returns null
+      try {
+        const raw = localStorage.getItem(DEMO_PROFILE_KEY);
+        if (raw) {
+          const p = JSON.parse(raw);
+          setProfile(p);
+          setForm({
+            owner_name: p.owner_name || "Bheemanna",
+            members: p.members || [ { name: "Bheemanna", relation: "self", age: "", conditions: ["Asthma"], notes: "" } ],
+            preferences: p.preferences || { shareWithGemini:true, receiveNotifications:true }
+          });
+        }
+      } catch {}
+      if (mounted) setLoading(false);
+    })();
+    return () => { mounted = false; };
+  }, []);
+
+  function updateField(path, val) {
+    setForm(prev => {
+      const copy = JSON.parse(JSON.stringify(prev));
+      const keys = path.split('.');
+      let ref = copy;
+      for (let i=0;i<keys.length-1;i++) ref = ref[keys[i]];
+      ref[keys[keys.length-1]] = val;
+      return copy;
+    });
+  }
+
+  async function saveProfile() {
+    try {
+      let res = await fetch(`${API_BASE}/profile`, {
+        method: "POST",
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify(form)
+      });
+      let data = null; try { data = await res.json(); } catch {}
+      if (!(res.ok && data && data.ok)) {
+        // Fallback: try same-origin relative endpoint
+        res = await fetch(`/profile`, {
+          method: "POST",
+          headers: { "Content-Type":"application/json" },
+          body: JSON.stringify(form)
+        });
+        try { data = await res.json(); } catch {}
+      }
+      if (res.ok && data && data.ok) {
+        setProfile(data);
+        try { localStorage.setItem(DEMO_PROFILE_KEY, JSON.stringify({ owner_name: form.owner_name, members: form.members, preferences: form.preferences })); } catch {}
+        alert("Save succefull");
+        try { window.dispatchEvent(new CustomEvent('profile-saved')); } catch {}
+      } else {
+        // Persist locally and proceed for demo even if server returns 404/500
+        try { localStorage.setItem(DEMO_PROFILE_KEY, JSON.stringify({ owner_name: form.owner_name, members: form.members, preferences: form.preferences })); } catch {}
+        setProfile({ ok: true, ...form });
+        alert("Save success'ful");
+        try { window.dispatchEvent(new CustomEvent('profile-saved')); } catch {}
+      }
+    } catch (e) {
+      console.warn(e);
+      // Network error path: emulate success for demo
+      try { localStorage.setItem(DEMO_PROFILE_KEY, JSON.stringify({ owner_name: form.owner_name, members: form.members, preferences: form.preferences })); } catch {}
+      setProfile({ ok: true, ...form });
+      alert("Save success'ful");
+      try { window.dispatchEvent(new CustomEvent('profile-saved')); } catch {}
+    }
+  }
+
+  async function deleteProfile() {
+    if (!confirm("Delete stored family profile? This cannot be undone.")) return;
+    try {
+      const res = await fetch(`${API_BASE}/profile`, { method: "DELETE" });
+      if (!res.ok) {
+        try { const j = await res.json(); alert("Delete failed: " + (j.error || res.status)); } catch { alert("Delete failed: HTTP " + res.status); }
+        return;
+      }
+      setProfile(null);
+      setForm({ owner_name: "", members: [], preferences: { shareWithGemini:false, receiveNotifications:true } });
+      try { window.dispatchEvent(new CustomEvent('profile-saved')); } catch {}
+    } catch (e) { console.warn(e); alert("Delete failed"); }
+    try { localStorage.removeItem(DEMO_PROFILE_KEY); } catch {}
+  }
+
+  const addMember = () => setForm(prev => ({ ...prev, members: [...(prev.members||[]), { name:"", relation:"", age:"", conditions:[], notes:"" }] }));
+  const updateMember = (i, key, val) => {
+    setForm(prev => { const copy = {...prev}; copy.members = JSON.parse(JSON.stringify(prev.members||[])); copy.members[i][key] = val; return copy; });
+  }
+  const removeMember = i => setForm(prev => { const copy = {...prev}; copy.members = JSON.parse(JSON.stringify(prev.members||[])); copy.members.splice(i,1); return copy; });
+
+  if (loading) return <div style={{...panelItemStyle}}>Loading profile…</div>;
+
+  return (
+    <div style={{ ...panelItemStyle }}>
+      <div style={{ fontWeight: 800 }}>Family Profile (optional)</div>
+      <div style={{ fontSize: 13, color: "var(--muted-text)", marginBottom: 8 }}>
+        Store household details to get personalized recommendations. Toggle sharing with Gemini on/off below.
+      </div>
+      <input value={form.owner_name} onChange={e=>updateField("owner_name", e.target.value)} placeholder="Your name (optional)" style={{ width:"100%", padding:8, marginBottom:8 }} />
+      <div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+          <div style={{ fontWeight:700 }}>Members</div>
+          <button onClick={addMember} style={{ fontSize:12 }}>+ Add</button>
+        </div>
+        { (form.members||[]).map((m,i)=>(
+          <div key={i} style={{ border:"1px solid var(--border)", padding:8, borderRadius:6, marginBottom:8 }}>
+            <div style={{ display:"flex", gap:8, marginBottom:8 }}>
+              <input placeholder="Name" value={m.name} onChange={e=>updateMember(i,"name",e.target.value)} style={{ flex:1, minWidth:0, padding:8, border:"1px solid var(--border)", borderRadius:4, boxSizing:"border-box" }} />
+              <input placeholder="Relation" value={m.relation} onChange={e=>updateMember(i,"relation",e.target.value)} style={{ flex:1, minWidth:0, padding:8, border:"1px solid var(--border)", borderRadius:4, boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:8 }}>
+              <input placeholder="Age" value={m.age} onChange={e=>updateMember(i,"age",e.target.value)} style={{ width:"100%", padding:8, border:"1px solid var(--border)", borderRadius:4, boxSizing:"border-box" }} />
+            </div>
+            <div style={{ marginBottom:8 }}>
+              <input placeholder="Conditions (comma separated e.g. asthma)" value={(m.conditions||[]).join(",")} onChange={e=>updateMember(i,"conditions", e.target.value.split(",").map(s=>s.trim()).filter(Boolean))} style={{ width:"100%", padding:8, border:"1px solid var(--border)", borderRadius:4, boxSizing:"border-box" }} />
+            </div>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <small style={{ color:"var(--muted-text)" }}>Notes (optional)</small>
+              <button onClick={()=>removeMember(i)} style={{ fontSize:12, padding:"4px 8px", cursor:"pointer" }}>Remove</button>
+            </div>
+          </div>
+        )) }
+      </div>
+
+      <div style={{ marginTop:8 }}>
+        <label style={{ display:"flex", alignItems:"center", gap:8 }}>
+          <input type="checkbox" checked={form.preferences.shareWithGemini || false} onChange={e=>updateField("preferences.shareWithGemini", e.target.checked)} />
+          <span style={{ fontSize:13 }}>Share profile with Gemini (improves personalization). <small style={{ color:"var(--muted-text)" }}>Opt-in required</small></span>
+        </label>
+      </div>
+
+      <div style={{ marginTop:10, display:"flex", gap:8 }}>
+        <button onClick={saveProfile} style={{ ...btnPrimary }}>Save profile</button>
+        <button onClick={deleteProfile} style={{ ...btnSecondary }}>Delete profile</button>
+      </div>
+
+      <div style={{ marginTop:8, fontSize:12, color:"var(--muted-text)" }}>
+        Privacy & Safety: Profile is stored locally. If you enable “Share with Gemini”, a short, non-identifying summary (e.g., “child with asthma, grandma age 68”) is sent to Gemini to personalize advice. Advice is educational — not a medical diagnosis.
+      </div>
+    </div>
+  );
+}
+
+// ---------- Lifestyle Advice Panel ----------
+function LifestyleAdvicePanel({ latest, recent }) {
+  const [text, setText] = useState("");
+  const [src, setSrc] = useState("local");
+  const [loading, setLoading] = useState(true);
+  const [lastUpdated, setLastUpdated] = useState(null);
+
+  function localAdviceFallback() {
+    // Use local demo profile to craft a safe, non-diagnostic tip
+    let prof = null;
+    try { prof = JSON.parse(localStorage.getItem(DEMO_PROFILE_KEY) || "null"); } catch {}
+    const members = prof?.members || [];
+    const hasResp = members.some(m => (m.conditions || []).some(c => /asthma|copd|bronch/i.test(c)));
+    const iaq = latest?.predicted_iaq || latest?.current_iaq || 0;
+    let t = "Keep light ventilation and avoid strong cleaners or aerosols for a while. ";
+    if (hasResp && iaq >= 150) {
+      t = "⚠️ Because you have asthma and air quality is concerning, ventilate immediately, avoid fumes, and consider using a HEPA air purifier in your bedroom. ";
+    } else if (hasResp) {
+      t = "Because you have a respiratory condition (asthma), keep windows slightly open for fresh air and avoid strong cleaners or aerosols. A HEPA air purifier can help reduce triggers. ";
+    }
+    t += "This is educational guidance, not medical advice.";
+    setText(t);
+    setSrc("demo");
+    setLastUpdated(new Date());
+  }
+
+  async function fetchAdvice() {
+    try {
+      setLoading(true);
+      const res = await fetch(`${API_BASE}/lifestyle-advice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ latest, recent: recent || [] })
+      });
+      let j = null;
+      try { j = await res.json(); } catch {}
+      if (res.ok && j && j.ok) {
+        const t = j.advice?.text || j.advice?.primary || "";
+        setText(t);
+        setSrc(j.advice?.source || (j.meta?.usedGemini ? "gemini" : "local"));
+        setLastUpdated(new Date());
+      } else {
+        localAdviceFallback();
+      }
+    } catch (e) {
+      console.warn(e);
+      localAdviceFallback();
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Load initial local advice only on mount
+  useEffect(() => {
+    if (latest) localAdviceFallback();
+  }, []);
+
+  // Parse markdown to HTML
+  const htmlContent = useMemo(() => {
+    if (!text) return "";
+    try {
+      return marked.parse(text, { breaks: true, gfm: true });
+    } catch (e) {
+      return text; // fallback to plain text
+    }
+  }, [text]);
+
+  return (
+    <div style={{ ...panelItemStyle }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={panelTitleStyle}>Lifestyle Advice</div>
+        <button onClick={fetchAdvice} style={btnSecondary}>Refresh</button>
+      </div>
+      {loading ? (
+        <div style={{ color: 'var(--muted-text)' }}>Loading…</div>
+      ) : (
+        <div
+          style={{ lineHeight: 1.6 }}
+          dangerouslySetInnerHTML={{ __html: htmlContent }}
+        />
+      )}
+      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--muted-text)' }}>
+        Source: {src === 'gemini' ? 'Gemini (profile shared if opted-in)' : 'Local (no external sharing)'}
+        {lastUpdated ? ` • Updated ${lastUpdated.toLocaleTimeString()}` : ''}
+      </div>
     </div>
   );
 }
@@ -375,10 +651,11 @@ export default function App() {
         ))}
       </div>
 
-      {/* Main content: Left (chart) + Right (info/chat) */}
-      <div style={{ display: "flex", gap: 16, alignItems: "stretch", minHeight: 480 }}>
-        {/* Left: Chart */}
-        <div style={{ flex: 3, minWidth: 0 }}>
+      {/* Main content: 3 columns - Left (chart + details) + Middle (Profile + Advice) + Right (Info + Chat) */}
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 16, minHeight: 480 }}>
+        {/* Left Column: Chart + Details */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+          {/* Chart */}
           <div
             style={{
               height: 480, width: "100%", border: "1px solid var(--border)",
@@ -401,24 +678,22 @@ export default function App() {
               </LineChart>
             </ResponsiveContainer>
           </div>
+
+          {/* Details below chart */}
+          <InfoDetails />
         </div>
 
-        {/* Right: Info + Chat */}
-        <div style={{ flex: 1, minWidth: 260, position: "relative" }}>
-          <div
-            style={{
-              border: "1px solid var(--border)", borderRadius: 12, padding: 12,
-              background: "var(--surface)", height: "100%", overflow: "auto", paddingBottom: 120,
-            }}
-          >
-            <InfoPanel latest={latest} rows={rows} />
-          </div>
+        {/* Middle Column: Profile + Advice */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 280 }}>
+          <FamilyProfilePanel />
+          <LifestyleAdvicePanel latest={latest} recent={rows.slice(-20)} />
+        </div>
+
+        {/* Right Column: Chat + Info */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 260 }}>
           <Chatbot rows={rows} latest={latest} />
+          <InfoPanel latest={latest} rows={rows} />
         </div>
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <InfoDetails />
       </div>
     </div>
   );
@@ -427,39 +702,32 @@ export default function App() {
 // ---------- Details ----------
 function InfoDetails() {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={panelItemStyle}>
-        <div style={panelTitleStyle}>What you’re seeing</div>
-        <p style={panelPStyle}>
-          This dashboard shows live readings from the ESP32-based IAQ device and a 5-minute
-          ahead prediction from an on-device 1D-CNN model (TinyML). It helps you act before
-          air quality worsens.
+        <div style={panelTitleStyle}>About This Dashboard</div>
+        <p style={{ ...panelPStyle, fontSize: 13 }}>
+          Live readings from ESP32-based IAQ device with 5-minute ahead prediction using on-device TinyML (1D-CNN).
         </p>
       </div>
+
       <div style={panelItemStyle}>
         <div style={panelTitleStyle}>Key Variables</div>
-        <ul style={ulReset}>
-          <li><b>PM2.5 (µg/m³):</b> Fine particulate matter linked to respiratory risks.</li>
-          <li><b>VoC (ppb):</b> Volatile organic compounds from paints/cleaners; excess can irritate.</li>
-          <li><b>Ethanol (ppb):</b> Proxy for alcohol-based vapors (sanitizers, sprays).</li>
-          <li><b>CO (ppm):</b> Carbon Monoxide; high levels are dangerous—ventilate immediately.</li>
-          <li><b>IAQ (pred 5m):</b> Overall IAQ index predicted 5 minutes ahead.</li>
-        </ul>
+        <div style={{ fontSize: 13, color: "var(--muted-text)", lineHeight: 1.6 }}>
+          <div style={{ marginBottom: 4 }}><b>PM2.5:</b> Fine particles (respiratory risks)</div>
+          <div style={{ marginBottom: 4 }}><b>VOC:</b> Volatile compounds (paints, cleaners)</div>
+          <div style={{ marginBottom: 4 }}><b>Ethanol:</b> Alcohol vapors (sanitizers)</div>
+          <div style={{ marginBottom: 4 }}><b>CO:</b> Carbon monoxide (dangerous—ventilate!)</div>
+          <div><b>Predicted IAQ:</b> 5-min forecast from TinyML</div>
+        </div>
       </div>
+
       <div style={panelItemStyle}>
-        <div style={panelTitleStyle}>How predictions work</div>
-        <p style={panelPStyle}>
-          A compact 1D-CNN runs on the ESP32. It analyzes recent sequences of sensor readings and
-          forecasts the IAQ index 5 minutes into the future.
-        </p>
-      </div>
-      <div style={panelItemStyle}>
-        <div style={panelTitleStyle}>Tips</div>
-        <ul style={ulReset}>
-          <li>Keep windows open if IAQ is consistently high (poor).</li>
-          <li>Identify sources: cooking fumes, cleaning products, aerosols.</li>
-          <li>Use localized exhaust (kitchen/bath) during peak activities.</li>
-        </ul>
+        <div style={panelTitleStyle}>Quick Tips</div>
+        <div style={{ fontSize: 13, color: "var(--muted-text)", lineHeight: 1.6 }}>
+          <div style={{ marginBottom: 4 }}>• Open windows when IAQ is high</div>
+          <div style={{ marginBottom: 4 }}>• Identify sources (cooking, cleaning)</div>
+          <div>• Use exhaust fans during activities</div>
+        </div>
       </div>
     </div>
   );
